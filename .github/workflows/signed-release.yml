@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
 
 env:
-  KEYSTORE_PATH: android/bizspot-upload-key.jks
+  KEYSTORE_PATH: ${{ github.workspace }}/android/bizspot-upload-key.jks
   KEYSTORE_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
   KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
   KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
@@ -54,11 +54,6 @@ jobs:
           echo "$KEYSTORE_B64" | base64 --decode > "$KEYSTORE_PATH"
 
       - name: Configure release signing
-        env:
-          KEYSTORE_PATH: ${{ env.KEYSTORE_PATH }}
-          KEYSTORE_ALIAS: ${{ env.KEYSTORE_ALIAS }}
-          KEYSTORE_PASSWORD: ${{ env.KEYSTORE_PASSWORD }}
-          KEY_PASSWORD: ${{ env.KEY_PASSWORD }}
         run: |
           python3 - <<'PY'
           from pathlib import Path
@@ -69,7 +64,8 @@ jobs:
           if marker not in s:
               raise SystemExit('android block not found')
           s = s.replace(marker, signing, 1)
-          s = s.replace('buildTypes {\n        release {', 'buildTypes {\n        release {\n            signingConfig signingConfigs.release', 1)
+          if 'signingConfig signingConfigs.release' not in s:
+              s = s.replace('buildTypes {\n        release {', 'buildTypes {\n        release {\n            signingConfig signingConfigs.release', 1)
           p.write_text(s)
           PY
 
