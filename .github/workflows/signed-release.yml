@@ -1,0 +1,99 @@
+name: Bizspot Signed Production Release
+
+on:
+  workflow_dispatch:
+
+env:
+  KEYSTORE_PATH: android/bizspot-upload-key.jks
+  KEYSTORE_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+  KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+  KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+
+jobs:
+  signed-release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Build web app
+        run: npm run build
+
+      - name: Add Android platform
+        run: npx cap add android
+
+      - name: Sync Capacitor
+        run: npx cap sync android
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+
+      - name: Decode Android upload keystore
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          if [ -z "$KEYSTORE_B64" ]; then
+            echo "ANDROID_KEYSTORE_BASE64 is not configured."
+            exit 1
+          fi
+          echo "$KEYSTORE_B64" | base64 --decode > "$KEYSTORE_PATH"
+
+      - name: Configure release signing
+        env:
+          KEYSTORE_PATH: ${{ env.KEYSTORE_PATH }}
+          KEYSTORE_ALIAS: ${{ env.KEYSTORE_ALIAS }}
+          KEYSTORE_PASSWORD: ${{ env.KEYSTORE_PASSWORD }}
+          KEY_PASSWORD: ${{ env.KEY_PASSWORD }}
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('android/app/build.gradle')
+          s = p.read_text()
+          marker = 'android {'
+          signing = '''android {\n    signingConfigs {\n        release {\n            storeFile file(System.getenv("KEYSTORE_PATH"))\n            storePassword System.getenv("KEYSTORE_PASSWORD")\n            keyAlias System.getenv("KEYSTORE_ALIAS")\n            keyPassword System.getenv("KEY_PASSWORD")\n        }\n    }'''
+          if marker not in s:
+              raise SystemExit('android block not found')
+          s = s.replace(marker, signing, 1)
+          s = s.replace('buildTypes {\n        release {', 'buildTypes {\n        release {\n            signingConfig signingConfigs.release', 1)
+          p.write_text(s)
+          PY
+
+      - name: Build signed release AAB
+        working-directory: android
+        run: ./gradlew bundleRelease --no-daemon
+
+      - name: Verify AAB exists
+        run: test -s android/app/build/outputs/bundle/release/app-release.aab
+
+      - name: Upload signed production AAB
+        uses: actions/upload-artifact@v4
+        with:
+          name: bizspot-signed-production-aab
+          path: android/app/build/outputs/bundle/release/app-release.aab
+          if-no-files-found: error
+
+      - name: Build signed release APK
+        working-directory: android
+        run: ./gradlew assembleRelease --no-daemon
+
+      - name: Upload signed production APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: bizspot-signed-production-apk
+          path: android/app/build/outputs/apk/release/app-release.apk
+          if-no-files-found: error
