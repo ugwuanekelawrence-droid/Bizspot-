@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 
-type Business = { id: number; name: string; category: string; state: string; city: string; description: string; phone: string; open: boolean; featured?: boolean; };
+type Business = { id: number; name: string; category: string; state: string; city: string; description: string; phone: string; open: boolean; featured?: boolean };
 type Photo = { name: string; data: string };
 
 const states = ['All States','Abia','Adamawa','Akwa Ibom','Anambra','Bauchi','Bayelsa','Benue','Borno','Cross River','Delta','Ebonyi','Edo','Ekiti','Enugu','Gombe','Imo','Jigawa','Kaduna','Kano','Katsina','Kebbi','Kogi','Kwara','Lagos','Nasarawa','Niger','Ogun','Ondo','Osun','Oyo','Plateau','Rivers','Sokoto','Taraba','Yobe','Zamfara','FCT'];
@@ -22,9 +22,11 @@ function resizePhoto(file: File): Promise<Photo> {
         const max = 1000;
         const scale = Math.min(1, max / Math.max(img.width, img.height));
         const canvas = document.createElement('canvas');
-        canvas.width = Math.round(img.width * scale);
-        canvas.height = Math.round(img.height * scale);
-        canvas.getContext('2d')?.drawImage(img, 0, 0, canvas.width, canvas.height);
+        canvas.width = Math.max(1, Math.round(img.width * scale));
+        canvas.height = Math.max(1, Math.round(img.height * scale));
+        const context = canvas.getContext('2d');
+        if (!context) return reject(new Error('Canvas unavailable'));
+        context.drawImage(img, 0, 0, canvas.width, canvas.height);
         resolve({ name: file.name, data: canvas.toDataURL('image/jpeg', 0.78) });
       };
       img.onerror = () => reject(new Error('Could not read image'));
@@ -59,20 +61,42 @@ function App() {
   async function handlePhotos(e: React.ChangeEvent<HTMLInputElement>) {
     setPhotoError('');
     const files = Array.from(e.target.files || []);
-    if (photos.length + files.length > 5) { setPhotoError('You can upload up to 5 business photos.'); return; }
+    if (photos.length + files.length > 5) {
+      setPhotoError('You can upload up to 5 business photos.');
+      return;
+    }
     const valid = files.filter(file => file.type.startsWith('image/') && file.size <= 8 * 1024 * 1024);
     if (valid.length !== files.length) setPhotoError('Only image files up to 8MB each are allowed.');
-    try { setPhotos(prev => [...prev, ...await Promise.all(valid.map(resizePhoto))]); } catch { setPhotoError('One of the selected images could not be processed.'); }
+    try {
+      const newPhotos = await Promise.all(valid.map(resizePhoto));
+      setPhotos(prev => [...prev, ...newPhotos]);
+    } catch {
+      setPhotoError('One of the selected images could not be processed.');
+    }
+    e.currentTarget.value = '';
   }
 
   function submitBusiness(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const form = new FormData(e.currentTarget);
-    const submission = { id: Date.now(), businessName: String(form.get('businessName') || ''), category: String(form.get('category') || ''), state: String(form.get('state') || ''), city: String(form.get('city') || ''), phone: String(form.get('phone') || ''), description: String(form.get('description') || ''), photos, status: 'pending', submittedAt: new Date().toISOString() };
+    const submission = {
+      id: Date.now(),
+      businessName: String(form.get('businessName') || ''),
+      category: String(form.get('category') || ''),
+      state: String(form.get('state') || ''),
+      city: String(form.get('city') || ''),
+      phone: String(form.get('phone') || ''),
+      description: String(form.get('description') || ''),
+      photos,
+      status: 'pending',
+      submittedAt: new Date().toISOString(),
+    };
     const pending = JSON.parse(localStorage.getItem('bizspot-pending-submissions') || '[]');
     localStorage.setItem('bizspot-pending-submissions', JSON.stringify([...pending, submission]));
     setMessage('Business submitted for review with its photos. It will appear publicly after approval.');
-    setPhotos([]); setPhotoError(''); setShowForm(false);
+    setPhotos([]);
+    setPhotoError('');
+    setShowForm(false);
   }
 
   return <div className="app">
